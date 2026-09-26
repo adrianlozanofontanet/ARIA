@@ -96,7 +96,7 @@ async function sendMessage(textToSend = null) {
   }
 
   if (!text) {
-    addMessage("aria", "📱 ¡Escribe algo primero!", false);
+    addMessage("aria", "Escribe algo primero.", false);
     toggleInputState(false);
     isProcessing = false;
     return;
@@ -151,7 +151,7 @@ async function sendMessage(textToSend = null) {
 
   } catch (err) {
     console.error("Error en sendMessage:", err);
-    addMessage("aria", "❌ Error al enviar. Inténtalo de nuevo.", true);
+    addMessage("aria", "Error al enviar. Inténtalo de nuevo.", true);
     const lastUserMsg = messages.filter(m => m.sender === 'user').pop();
     if (lastUserMsg) {
       lastUserMsg.failed = true;
