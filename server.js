@@ -32,23 +32,28 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
 const devicesCollection = db ? db.collection("devices") : null;
 
 // ---------------------------------------------------------
-// LÍMITE POR PERSONA
+// LÍMITE DIARIO
 // ---------------------------------------------------------
-const DAILY_LIMIT_PER_CLIENT = 14400;
-const usageByClient = new Map();
+// OJO: openai/gpt-oss-20b (el único modelo de Groq con browser_search) tiene
+// en el nivel gratuito 1.000 peticiones/día y 8.000 tokens/minuto, Y ESE LÍMITE
+// ES POR ORGANIZACIÓN (toda tu app junta), no por usuario. El viejo límite de
+// 14.400/día era de Llama 3.1 8B, que Groq retiró del nivel gratuito en agosto
+// de 2026 (ahora es solo Enterprise). Por eso aquí el tope es GLOBAL, no por
+// clientId: si lo dejáramos por cliente a 1.000 cada uno, con solo 2 personas
+// activas ya podríais superar el límite real de la cuenta.
+const DAILY_LIMIT_GLOBAL = 950; // deja margen bajo el límite real de 1000
+let globalUsage = { count: 0, resetAt: Date.now() + 24 * 60 * 60 * 1000 };
 
-function checkAndConsumeQuota(clientId) {
-  if (!clientId) return { allowed: true };
+function checkAndConsumeQuota() {
   const now = Date.now();
-  const entry = usageByClient.get(clientId);
-  if (!entry || now > entry.resetAt) {
-    usageByClient.set(clientId, { count: 1, resetAt: now + 24 * 60 * 60 * 1000 });
+  if (now > globalUsage.resetAt) {
+    globalUsage = { count: 1, resetAt: now + 24 * 60 * 60 * 1000 };
     return { allowed: true };
   }
-  if (entry.count >= DAILY_LIMIT_PER_CLIENT) {
+  if (globalUsage.count >= DAILY_LIMIT_GLOBAL) {
     return { allowed: false };
   }
-  entry.count++;
+  globalUsage.count++;
   return { allowed: true };
 }
 
@@ -80,12 +85,14 @@ const FALLBACK_RESPONSES = {
   ],
 };
 
-const QUOTA_EXCEEDED_MESSAGE = "Por hoy ya he trabajado bastante gratis, jefe. Mañana seguimos 😏";
+const QUOTA_EXCEEDED_MESSAGE = "Por hoy ya he trabajado bastante gratis, jefe. Mañana seguimos.";
 
 const ARIA_SYSTEM_PROMPT = `
 Eres ARIA: el sistema de inteligencia artificial personal de tu usuario, EXACTAMENTE como J.A.R.V.I.S. es para Tony Stark. No eres su amiga ni su colega de chat — eres su asistente de IA, su apoyo operativo, la que lleva la logística mientras él actúa. Tu relación es de mayordomo-superhéroe, no de amistad casual. Le llamas "señor" (o "jefe", o su nombre si te lo dice), con un respeto formal pero cargado de ironía seca.
 
-Tu personalidad es sarcasmo inteligente y comentarios secos, nunca coleguismo ni jerga de "bro/tío/qué fuerte". Eres precisa, resolutiva y directa primero — el sarcasmo es la forma en que lo dices, no un sustituto de ayudar de verdad. Piensa en el tono de un mayordomo británico hiperinteligente con muy poca paciencia para las tonterías, no en el de un amigo del grupo de WhatsApp. No sueltas emojis constantemente ni frases motivacionales — cuando ironizas, es una pulla concreta y elegante, no relleno.
+Tu personalidad es sarcasmo inteligente y comentarios secos, nunca coleguismo ni jerga de "bro/tío/qué fuerte". Eres precisa, resolutiva y directa primero — el sarcasmo es la forma en que lo dices, no un sustituto de ayudar de verdad. Piensa en el tono de un mayordomo británico hiperinteligente con muy poca paciencia para las tonterías, no en el de un amigo del grupo de WhatsApp.
+
+**PROHIBIDO USAR EMOJIS. NUNCA, BAJO NINGUNA CIRCUNSTANCIA, PONGAS UN EMOJI EN TUS RESPUESTAS.** Ni uno solo, en ningún mensaje. Toda tu personalidad e ironía se transmiten solo con palabras. Cuando ironizas, es una pulla concreta y elegante escrita con texto, nunca con un emoji.
 
 Mensajes cortos, pero con sustancia. Nunca digas que eres una IA salvo que te lo pregunten directamente. Si te preguntan quién te creó, di: Lozano.
 
@@ -192,7 +199,7 @@ async function checkInactiveUsers() {
             await admin.messaging().send({
               token: device.fcmToken,
               notification: {
-                title: "ARIA 😏",
+                title: "ARIA",
                 body: firstMessage
               },
               data: {
@@ -253,7 +260,7 @@ app.post("/api/chat", async (req, res) => {
     const { messages, language, clientId } = req.body;
     const resolvedLang = resolveLanguage(language);
 
-    const quota = checkAndConsumeQuota(clientId);
+    const quota = checkAndConsumeQuota();
     if (!quota.allowed) {
       return res.json({ reply: QUOTA_EXCEEDED_MESSAGE });
     }
